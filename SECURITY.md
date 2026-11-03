@@ -11,7 +11,11 @@ provider replies, audit logs, benchmark assets and database files out of Git.
 Pseudonymizing an identifier alone does not anonymize medical data. Rebuild
 sharing permissions and privacy review for each dataset/provider deployment.
 
-This release contains synthetic fixtures only. It does not authorize sending
+Executable tests contain synthetic fixtures only. The documentation additionally
+includes explicitly supplied, reviewed UI excerpts; the editor excerpt has its
+case list cropped and identity bar irreversibly covered before re-encoding.
+Only their exact reviewed bytes are allowed by the documentation-media manifest.
+These excerpts are not a redistributable clinical dataset. It does not authorize sending
 medical images or identifying metadata to an external model. Generated local
 artifacts can contain sensitive information and must be reviewed before sharing.
 

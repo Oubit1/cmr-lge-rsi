@@ -25,3 +25,22 @@ They are not needed to run the dashboard, editor, QC tooling or synthetic tests.
 `runtime/` and `data/` remain private even after a local run. The public audit
 checks content and file names in addition to `.gitignore`. Future changes still
 need review: no automated scanner can prove all possible sensitive data absent.
+
+## Reviewed interface media
+
+The operator subsequently supplied a dashboard screenshot and two screen recordings
+for public documentation. Only reviewed derivatives are included. The editor clip
+uses original seconds 36–52: the entire case list is cropped away and the identity
+bar is covered with an opaque rectangle on every frame. Both videos are silent
+and re-encoded without source metadata. Original files remain local.
+
+The identity mask was checked in every decoded editor frame (383 frames, no
+nonuniform interior detected). This checks the visible redaction geometry, not
+clinical correctness or anonymization of arbitrary future inputs. The remaining
+UI and image viewport were visually reviewed; no personal identity text is shown.
+The recording-tool watermark is retained. These are illustrative UI excerpts,
+not source medical data or a clinical evaluation dataset.
+
+`approved-media.json` binds these specific assets to SHA-256 and byte counts.
+Any replacement must be reviewed and the manifest updated; other binary or
+clinical files remain blocked by the publication audit.

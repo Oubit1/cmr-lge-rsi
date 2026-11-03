@@ -1,4 +1,6 @@
 import importlib.util
+import hashlib
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -32,3 +34,35 @@ class PublicReleaseTests(unittest.TestCase):
             root=Path(tmp);p=root/"keep.txt";p.write_text("preserve")
             with self.assertRaises(SystemExit):create(root)
             self.assertEqual(p.read_text(),"preserve")
+
+    def test_reviewed_media_exception_is_bound_to_exact_bytes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            folder=root/"docs/assets";folder.mkdir(parents=True)
+            data=b"synthetic-review-fixture"
+            image=folder/"console-ui.png";image.write_bytes(data)
+            (folder/"approved-media.json").write_text(json.dumps({
+                "schema":"reviewed-ui-media-v1", "files":{
+                    "docs/assets/console-ui.png":{
+                        "sha256":hashlib.sha256(data).hexdigest(), "bytes":len(data)
+                    }
+                }
+            }))
+            self.assertEqual(audit.audit(root)[1],[])
+            image.write_bytes(b"unreviewed replacement")
+            self.assertIn(("docs/assets/console-ui.png","unreviewed_media_change"),
+                          audit.audit(root)[1])
+
+    def test_manifest_cannot_allow_arbitrary_medical_or_runtime_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);folder=root/"docs/assets";folder.mkdir(parents=True)
+            data=b"synthetic"
+            p=root/"patient.nii.gz";p.write_bytes(data)
+            (folder/"approved-media.json").write_text(json.dumps({
+                "schema":"reviewed-ui-media-v1", "files":{
+                    "patient.nii.gz":{
+                        "sha256":hashlib.sha256(data).hexdigest(), "bytes":len(data)
+                    }
+                }
+            }))
+            self.assertIn(("patient.nii.gz","private_artifact"),audit.audit(root)[1])

@@ -1,0 +1,34 @@
+{
+  "schema": "reviewed-ui-media-v1",
+  "review": "Operator-provided UI media, visually inspected. Editor identities removed by an opaque mask and full list crop before re-encoding. Audio and source metadata removed from both recordings.",
+  "files": {
+    "docs/assets/console-ui.png": {
+      "sha256": "4a6b99a872d1b9e9a766b54a6062a2c96fb07f0c9cf6fcabd08270d89def3e8a",
+      "bytes": 246468
+    },
+    "docs/assets/editor-demo.mp4": {
+      "sha256": "8da05e07d954c1f5f678ad31f6b555a54e80873a61cfa7d79a05755b0a2ece8e",
+      "bytes": 857558
+    },
+    "docs/assets/editor-preview.gif": {
+      "sha256": "fd67f96528b2ef2e119db7fec624a7eb63a4c815420f3b09bd137871b3fe7aa2",
+      "bytes": 1262055
+    },
+    "docs/assets/editor-ui.jpg": {
+      "sha256": "c35a7d5a0fd46af53f9d4af45c532c965d6c34f94fb1e311343c4f93a32a5b4c",
+      "bytes": 111096
+    },
+    "docs/assets/workflow-demo.mp4": {
+      "sha256": "14d0c06bc6104fde6f02c8966809cf1981012b5e6315de62fbda39271e1b240b",
+      "bytes": 812539
+    },
+    "docs/assets/workflow-preview.gif": {
+      "sha256": "5f59867a30734a7e63e089de6d678c5a0bf7e22761a31dd62c83c293910c6eb8",
+      "bytes": 2604686
+    },
+    "docs/assets/workflow-ui.jpg": {
+      "sha256": "6d0821f603d04f7dde004c95d3a4492ca7961ac44a965e0bcf7e1c366d698369",
+      "bytes": 57519
+    }
+  }
+}
