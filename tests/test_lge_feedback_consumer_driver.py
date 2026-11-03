@@ -57,9 +57,9 @@ class LgeFeedbackConsumerDriverTests(unittest.TestCase):
                        return_value={"stage": "lge_myo"}), patch(
                 "scripts.run_lge_feedback_consumer.evaluation_input",
                 return_value=input_data()), patch(
-                "scripts.run_lge_feedback_consumer.importlib.import_module",
-                return_value=module), patch(
-                "scripts.run_lge_feedback_consumer.importlib.reload", return_value=module):
+                "scripts.run_lge_feedback_consumer.importlib",
+                types.SimpleNamespace(import_module=lambda name: module,
+                                      reload=lambda value: module)):
                 first = run_once(root, Path("dataset"), output, audit)
                 second = run_once(root, Path("dataset"), output, audit)
             self.assertEqual(first["status"], "PUBLISHED")
