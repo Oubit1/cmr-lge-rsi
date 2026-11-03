@@ -11,8 +11,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -21,12 +23,23 @@ HERE = Path(__file__).resolve().parents[1]
 TOOLS = HERE / "tools"
 
 
-def run_step(run_dir: Path, name: str, args: list[str], env: dict[str, str]) -> None:
+def run_step(run_dir: Path, name: str, args: list[str], env: dict[str, str], *, defer_log: bool = False) -> None:
     command = [sys.executable, *args]
     log = run_dir / f"{name}.log"
-    with log.open("w", encoding="utf-8") as handle:
-        handle.write("$ " + " ".join(command) + "\n\n")
-        result = subprocess.run(command, stdout=handle, stderr=subprocess.STDOUT, env=env)
+    # Intake requires an empty destination. Spool its log outside the dataset
+    # until it exits, including on failure, then retain it at the usual path.
+    with (tempfile.TemporaryFile(mode="w+b") if defer_log
+          else log.open("wb")) as handle:
+        handle.write(("$ " + " ".join(command) + "\n\n").encode("utf-8"))
+        handle.flush()
+        try:
+            result = subprocess.run(command, stdout=handle, stderr=subprocess.STDOUT, env=env)
+        finally:
+            if defer_log:
+                run_dir.mkdir(parents=True, exist_ok=True)
+                handle.seek(0)
+                with log.open("wb") as destination:
+                    shutil.copyfileobj(handle, destination)
     if result.returncode:
         raise RuntimeError(f"step {name} failed; inspect {log}")
 
@@ -41,8 +54,10 @@ def main() -> None:
     ap.add_argument("--root", type=Path, required=True)
     ap.add_argument("--input", type=Path, help="raw NIfTI/DICOM root; converted into --root before annotation")
     ap.add_argument("--device", default="auto", help="auto, cpu, cuda, or a CUDA device")
+    ap.add_argument("--model-registry", type=Path, help="Use the explicitly selected segmentation versions")
+    ap.add_argument("--orchestrator-root", type=Path, help="Controller checkout providing the registry adapter")
     ap.add_argument("--skip-annotation", action="store_true")
-    ap.add_argument("--audit-only", action="store_true", help="never modify labels")
+    ap.add_argument("--audit-only", action="store_true", help="audit an existing dataset without annotation or label changes")
     ap.add_argument("--no-render", action="store_true", help="skip large CMR check PNG rendering")
     ap.add_argument("--render-intermediate", action="store_true",
                     help="render every intermediate repair candidate (slow; final review rendering is always kept)")
@@ -55,21 +70,32 @@ def main() -> None:
     args = ap.parse_args()
     if args.audit_only and args.finalize_dataset:
         ap.error("--finalize-dataset cannot be combined with --audit-only")
+    if args.audit_only and args.input:
+        ap.error("--input cannot be combined with --audit-only; audit an existing --root")
+    if bool(args.model_registry) != bool(args.orchestrator_root):
+        ap.error("--model-registry and --orchestrator-root must be supplied together")
 
     root = args.root.resolve()
+    if args.input and root.exists() and any(root.iterdir()):
+        ap.error(f"refusing to overwrite non-empty output: {root}")
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = root / "label_iteration" / "full_pipeline_runs" / stamp
-    run_dir.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
-    (run_dir / "command.json").write_text(json.dumps(vars(args), default=str, indent=2) + "\n", encoding="utf-8")
 
     steps: list[str] = []
-    if args.input:
-        run_step(run_dir, "00_prepare_dataset", [str(TOOLS / "prepare_dataset.py"), "--input", str(args.input.resolve()), "--output", str(root)], env)
-        steps.append("prepare_dataset")
-    if not args.skip_annotation:
-        run_step(run_dir, "01_annotation", [str(TOOLS / "auto_annotate_dataset.py"), "--root", str(root), "--device", args.device], env)
+    try:
+        if args.input:
+            run_step(run_dir, "00_prepare_dataset", [str(TOOLS / "prepare_dataset.py"), "--input", str(args.input.resolve()), "--output", str(root)], env, defer_log=True)
+            steps.append("prepare_dataset")
+    finally:
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "command.json").write_text(json.dumps(vars(args), default=str, indent=2) + "\n", encoding="utf-8")
+    if not args.audit_only and not args.skip_annotation:
+        model_args = (["--model-registry", str(args.model_registry.resolve()),
+                       "--orchestrator-root", str(args.orchestrator_root.resolve())]
+                      if args.model_registry else [])
+        run_step(run_dir, "01_annotation", [str(TOOLS / "auto_annotate_dataset.py"), "--root", str(root), "--device", args.device, *model_args], env)
         steps.append("annotation")
 
     # CMR has its own dedicated audit in the next step.  Keep the LGE workflow
@@ -140,7 +166,7 @@ def main() -> None:
     # Convert the final residual lists into the four active review pools. CMR
     # cine frame indices are temporal; spatial boundary status is determined
     # from the patient-level ordered CMR files.
-    run_step(run_dir, "12_boundary_middle_triage", [str(TOOLS / "isolate_boundary_issue_slices.py"), "--root", str(root), "--remove-source-cmr"], env)
+    run_step(run_dir, "12_boundary_middle_triage", [str(TOOLS / "isolate_boundary_issue_slices.py"), "--root", str(root), *([] if args.audit_only else ["--remove-source-cmr"])], env)
     run_step(run_dir, "13_temporal_hole_dry_run", [str(TOOLS / "repair_cmr_temporal_missing_holes.py"), "--root", str(root), "--mode", "dry-run"], env)
     if not args.audit_only:
         run_step(run_dir, "13b_temporal_hole_apply", [str(TOOLS / "repair_cmr_temporal_missing_holes.py"), "--root", str(root), "--mode", "apply"], env)

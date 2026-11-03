@@ -12,6 +12,8 @@
 
 [Watch the demos](#watch-it-work) · [Highlights](#highlights) · [The improvement loop](#the-improvement-loop) · [Quick start](#quick-start) · [Deployment](docs/DEPLOYMENT.md)
 
+For the paired five-file dataset release and segmentation model lifecycle, see the [lifecycle guide](deploy/SEGMENTATION_LIFECYCLE.md) and [dispatch limits](deploy/SEGMENTATION_DISPATCH.md). These interfaces prepare and govern bounded training; autonomous architecture discovery is not implemented.
+
 </div>
 
 [![Live multi-agent workflow](docs/assets/workflow-preview.gif)](https://github.com/Oubit1/cmr-lge-rsi/blob/main/docs/assets/workflow-demo.mp4)

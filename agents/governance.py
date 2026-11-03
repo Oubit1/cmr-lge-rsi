@@ -3,6 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from app.database import Database
+from contracts.compat import model_dump
+
+
+SEGMENTATION_OWNERS = {"cmr_myo": "cmr_specialist", "lge_myo": "lge_myo_specialist",
+                       "lge_mi": "lge_mi_specialist"}
 
 
 ACTION_OWNERS = {
@@ -10,16 +15,29 @@ ACTION_OWNERS = {
     "isolated_code_experiment": "qc_code_optimizer",
     "rule_draft": "rule_curator",
     "skill_draft": "skill_maintainer",
+    "segmentation_training": SEGMENTATION_OWNERS,
 }
 EXECUTABLE_ACTION_STATUSES = {"APPROVED", "RUNNING", "SUCCEEDED"}
+
+
+def action_owner(payload: dict) -> str | None:
+    if payload.get("action_class") == "segmentation_training":
+        plan = payload.get("segmentation_cycle_plan")
+        return SEGMENTATION_OWNERS.get(plan.get("target")) if isinstance(plan, dict) else None
+    return ACTION_OWNERS.get(payload.get("action_class"))
 
 
 def enforce_action_ownership(actions: list) -> tuple[list, list[dict[str, str]]]:
     """Reject executable work assigned to a role that does not own it."""
     kept, blocked = [], []
     for action in actions:
-        expected = ACTION_OWNERS.get(action.action_class)
-        if expected and action.owner_role != expected:
+        payload = model_dump(action)
+        expected = action_owner(payload)
+        plan = payload.get("segmentation_cycle_plan") or {}
+        invalid_plan = (action.action_class == "segmentation_training" and
+                        (not expected or plan.get("owner_role") != expected
+                         or plan.get("owner") != expected or plan.get("action_id") != action.action_id))
+        if invalid_plan or (expected and action.owner_role != expected):
             blocked.append({
                 "action_id": action.action_id,
                 "owner_role": action.owner_role,
@@ -61,9 +79,16 @@ def original_action_approved(db: Database, run_id: int, row: dict[str, Any], pay
     """Read original role handoffs; does not make a rejected action executable."""
     if not payload.get("review_approved"):
         return False
-    expected = ACTION_OWNERS.get(payload.get("action_class"))
+    expected = action_owner(payload)
     if expected and row["owner_role"] != expected:
         return False
+    segmentation = payload.get("action_class") == "segmentation_training"
+    if segmentation:
+        plan = payload.get("segmentation_cycle_plan")
+        if (not expected or payload.get("owner_role") != expected or not isinstance(plan, dict)
+                or plan.get("owner_role") != expected or plan.get("owner") != expected
+                or plan.get("run_id") != run_id or plan.get("action_id") != row["action_id"]):
+            return False
     thread = f"run-{run_id}:{row['action_id']}"
     inbox = db.agent_inbox(run_id, row["owner_role"], thread_id=thread)
     assigned = any(item["sender_role"] == "supervisor"
@@ -72,6 +97,13 @@ def original_action_approved(db: Database, run_id: int, row: dict[str, Any], pay
                if item["sender_role"] == "independent_reviewer"
                and item["message_type"] == "action_review"]
     reviewed = bool(reviews and reviews[-1]["payload"].get("decision") == "accept_experiment")
+    if segmentation:
+        from app.segmentation_cycle import implementation_sha256
+        assignments = [item for item in inbox if item["sender_role"] == "supervisor"
+                       and item["message_type"] == "assigned_action"]
+        assigned = bool(assignments and assignments[-1]["payload"].get("action_class") == "segmentation_training"
+                        and assignments[-1]["payload"].get("segmentation_cycle_plan") == plan)
+        reviewed = reviewed and reviews[-1]["payload"].get("segmentation_plan_sha256") == implementation_sha256(plan)
     return assigned and reviewed
 
 

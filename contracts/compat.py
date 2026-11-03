@@ -16,8 +16,8 @@ def model_validate(model: Type[T], value: Any) -> T:
 
 def model_dump(value: BaseModel) -> dict[str, Any]:
     if hasattr(value, "model_dump"):
-        return value.model_dump()
-    return value.dict()
+        return value.model_dump(by_alias=True)
+    return value.dict(by_alias=True)
 
 
 def model_schema(model: Type[BaseModel]) -> dict[str, Any]:

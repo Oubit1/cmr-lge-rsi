@@ -22,11 +22,17 @@ from app.rsi_kernel import MetricSpec, canonical_hash, compare_fitness, variant_
 
 
 MODES = {"off", "observe", "enforce"}
+SEGMENTATION_CONTROL = {"app/paired_dataset.py", "app/segmentation_evidence.py", "app/dataset_validation.py", "app/dataset_control.py",
+    "app/segmentation_registry.py", "app/segmentation_training.py", "app/segmentation_evaluation.py", "app/segmentation_cycle.py",
+    "app/segmentation_jobs.py", "scripts/dataset_release.py", "scripts/train_segmentation_candidate.py",
+    "scripts/segment_from_registry.py", "app/segmentation_dispatch.py", "app/segmentation_host.py",
+    "scripts/run_segmentation_cycle.py", "app/segmentation_cohort.py", "configs/segmentation_dispatch.json"}
 PROTECTED = {"app/rsi_kernel.py", "app/rsi_runtime.py", "app/control_checkpoint.py",
              "app/rsi_quality_benchmark.py", "app/rsi_postpromotion.py", "app/lge_execution.py",
              "configs/lge_execution.json", "configs/rsi.json", "scripts/rsi_control.py"}
 PROTECTED.update({"scripts/run_lge_feedback_consumer.py", "scripts/validate_lge_generator.py",
                   "providers/openai_compatible.py", "agents/invocation.py", "app/prompt_dispatch.py", "app/workflow_budget.py", "scripts/verify_autonomous_run.py", "app/autonomy_control.py", "app/autonomy_feedback.py", "configs/autonomy.json", "app/lge_protocol.py", "scripts/autopilot.py", "scripts/board_server.py", "app/rsi_generator_benchmark.py", "configs/rsi_generator_benchmark.json"})
+PROTECTED.update(SEGMENTATION_CONTROL)
 
 
 def read_policy(root: Path) -> dict:

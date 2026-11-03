@@ -1119,6 +1119,10 @@ class Autopilot:
             has_human_released_action = False
             for row in self.db.run_details(run["run_id"])["maintenance_actions"]:
                 payload = json.loads(row["payload_json"])
+                if payload.get("action_class") == "segmentation_training":
+                    from app.segmentation_dispatch import proposal_context
+                    if not proposal_context(ROOT, run["run_id"]).get("enabled"):
+                        continue
                 # RUNNING means the previous controller was interrupted; no
                 # second controller can be active while this process owns the
                 # global flock. SUCCEEDED may still need deterministic
@@ -1207,6 +1211,17 @@ class Autopilot:
                 break
             payload = json.loads(row["payload_json"])
             action_id = row["action_id"]
+            if payload.get("action_class") == "segmentation_training":
+                if row["status"] in TERMINAL_ACTIONS:
+                    continue
+                from app.segmentation_dispatch import dispatch
+                outcome = dispatch(ROOT, self.db, run_id, action_id,
+                                   providers_path=self.args.providers, agents_path=self.args.agents)
+                results.append({"action_id": action_id, "segmentation": outcome})
+                self.event("SEGMENTATION_ACTION", run_id=run_id, action_id=action_id, **outcome)
+                # Dedicated typed-plan path: never run_llm_maintenance, code CAS,
+                # clinical-label consumer integration or framework_repair.
+                continue
             framework_repair = payload.get("action_class") == "framework_repair"
             if framework_repair:
                 from app.lge_protocol import action_allowed

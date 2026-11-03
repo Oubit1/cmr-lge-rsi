@@ -2,7 +2,35 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt, StrictStr
+
+
+class SegmentationBinding(BaseModel):
+    path: StrictStr
+    sha256: StrictStr = Field(min_length=64, max_length=64)
+
+    class Config:
+        extra = "forbid"
+
+
+class SegmentationCyclePlan(BaseModel):
+    """Owner output is a typed artifact plan, never an approval or command."""
+    schema_version: Literal["segmentation-cycle-v1"] = Field(alias="schema")
+    run_id: StrictInt
+    action_id: StrictStr
+    owner: StrictStr
+    owner_role: Literal["cmr_specialist", "lge_myo_specialist", "lge_mi_specialist"]
+    target: Literal["cmr_myo", "lge_myo", "lge_mi"]
+    registry_root: StrictStr
+    parent_id: StrictStr
+    policy_id: StrictStr
+    job: SegmentationBinding
+    architecture: SegmentationBinding
+    dataset_manifest: SegmentationBinding
+    cohort: SegmentationBinding
+
+    class Config:
+        extra = "forbid"
 
 
 class EvidenceCase(BaseModel):
@@ -42,6 +70,7 @@ class SpecialistAssessment(BaseModel):
     contraindications: List[str]
     expected_metrics: List[str]
     confidence: float = Field(ge=0.0, le=1.0)
+    segmentation_cycle_plan: Optional[SegmentationCyclePlan] = None
 
 
 class ReviewDecision(BaseModel):
@@ -74,13 +103,14 @@ class SupervisorAction(BaseModel):
     owner_role: str
     action_class: Literal[
         "known_tool", "isolated_code_experiment", "rule_draft",
-        "skill_draft", "human_review", "stop", "framework_repair",
+        "skill_draft", "human_review", "stop", "framework_repair", "segmentation_training",
     ]
     objective: str
     acceptance_metrics: List[str]
     priority: int = Field(ge=1, le=5)
     max_attempts: int = Field(ge=1, le=3)
     auto_execute: bool = False
+    segmentation_cycle_plan: Optional[SegmentationCyclePlan] = None
     # A near-duplicate may be a continuation only when it names the prior
     # action and one exact unmet metric from that action's reviewer feedback.
     continuation_of: Optional[str] = None

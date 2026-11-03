@@ -625,6 +625,8 @@ def build_evidence_package(run_details: dict[str, Any], *, max_cases: int = 80) 
         "modalities": sorted(modalities),
         "workstreams": workstreams,
         "workflow_dependency": dependency,
+        "segmentation_lifecycle": __import__("app.segmentation_status", fromlist=["status"]).status(project_root),
+        "segmentation_dispatch": __import__("app.segmentation_dispatch", fromlist=["proposal_context"]).proposal_context(project_root, run_details["run_id"]),
         "representative_cases": representative,
         "check_feedback": check_feedback_summary(dataset, project_root),
         "check_iteration": check_iteration,

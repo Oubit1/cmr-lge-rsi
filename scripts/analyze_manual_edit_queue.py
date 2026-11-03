@@ -14,6 +14,7 @@ import os
 import re
 import sys
 import time
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -283,33 +284,36 @@ def claim_one(work_root: Path, job_id: str | None=None) -> tuple[str, Path, Path
     for kind, source in sources:
         paths=[folder/"agent_request.json"] if job_id else sorted(source.glob("*/agent_request.json"))
         for request in paths:
-            if kind == "prompt":
-                local_path=request.parent/"local_request.json"
-                local=json.loads(local_path.read_text(encoding="utf-8")) if local_path.exists() else {}
-                if local.get("status") in {"READY","NO_CHANGE","MANUAL_REQUIRED","ERROR"}:continue
-                if not job_id and (local.get("execution_scope")=="interactive_prompt" or (request.parent/"interactive_budget.json").exists()):
+            from app.prompt_dispatch import job_lock
+            # Recovery must not see the rename before the live claim is durable.
+            with job_lock(request.parent) if kind == "prompt" else nullcontext():
+                if kind == "prompt":
+                    local_path=request.parent/"local_request.json"
+                    local=json.loads(local_path.read_text(encoding="utf-8")) if local_path.exists() else {}
+                    if local.get("status") in {"READY","NO_CHANGE","MANUAL_REQUIRED","ERROR"}:continue
+                    if not job_id and (local.get("execution_scope")=="interactive_prompt" or (request.parent/"interactive_budget.json").exists()):
+                        continue
+                if (request.parent / "agent_analysis.json").exists():
                     continue
-            if (request.parent / "agent_analysis.json").exists():
-                continue
-            if kind == "prompt" and (request.parent / "candidate.png").exists():
-                continue
-            claimed = request.with_suffix(".running")
-            try:
-                request.rename(claimed)
-            except FileNotFoundError:
-                continue
-            if kind == "prompt":
-                from app.prompt_dispatch import register_claim
-                register_claim(request.parent)
-            return kind, request, claimed
+                if kind == "prompt" and (request.parent / "candidate.png").exists():
+                    continue
+                claimed = request.with_suffix(".running")
+                try:
+                    request.rename(claimed)
+                except FileNotFoundError:
+                    continue
+                if kind == "prompt":
+                    from app.prompt_dispatch import register_claim
+                    register_claim(request.parent)
+                return kind, request, claimed
     return None
 
 
 def recover_stale_claims(work_root: Path, stale_seconds: int | None = None) -> int:
     """Recover abandoned claims once at worker startup.
 
-    A live worker owns its ``.running`` file, so recovery is deliberately not
-    performed in the polling loop. systemd guarantees one worker instance.
+    A live worker owns its ``.running`` file. Recovery shares the prompt claim
+    lock with explicit workers, including the rename-to-publication interval.
     """
     if stale_seconds is None:
         # This function runs before the new worker enters its polling loop;
@@ -320,26 +324,29 @@ def recover_stale_claims(work_root: Path, stale_seconds: int | None = None) -> i
     for source in (work_root / "prompt_jobs", work_root / "edits"):
         for running in sorted(source.glob("*/agent_request.running")):
             edit_dir = running.parent
-            if source.name == "prompt_jobs":
-                from app.prompt_dispatch import worker_alive
-                if worker_alive(edit_dir):continue
-            local_path=edit_dir/"local_request.json"
-            local=json.loads(local_path.read_text(encoding="utf-8")) if local_path.exists() else {}
-            terminal=any((edit_dir/name).exists() for name in ("candidate.png","agent_analysis.json")) or (
-                source.name=="prompt_jobs" and local.get("status") in {"READY","NO_CHANGE","MANUAL_REQUIRED","ERROR"})
-            if terminal:
-                queued=edit_dir/"agent_request.json"
-                if source.name=="prompt_jobs" and not queued.exists():running.rename(queued)
-                else:running.unlink(missing_ok=True)
-                continue
-            if now - running.stat().st_mtime < stale_seconds:
-                continue
-            queued = edit_dir / "agent_request.json"
-            if not queued.exists():
-                running.rename(queued)
-                if source.name == "prompt_jobs":
-                    _update_local_status(edit_dir, "QUEUED", recovery="stale_claim")
-                recovered += 1
+            from app.prompt_dispatch import job_lock, worker_alive
+            with job_lock(edit_dir) if source.name == "prompt_jobs" else nullcontext():
+                if not running.exists():
+                    continue
+                if source.name == "prompt_jobs" and worker_alive(edit_dir):
+                    continue
+                local_path=edit_dir/"local_request.json"
+                local=json.loads(local_path.read_text(encoding="utf-8")) if local_path.exists() else {}
+                terminal=any((edit_dir/name).exists() for name in ("candidate.png","agent_analysis.json")) or (
+                    source.name=="prompt_jobs" and local.get("status") in {"READY","NO_CHANGE","MANUAL_REQUIRED","ERROR"})
+                if terminal:
+                    queued=edit_dir/"agent_request.json"
+                    if source.name=="prompt_jobs" and not queued.exists():running.rename(queued)
+                    else:running.unlink(missing_ok=True)
+                    continue
+                if now - running.stat().st_mtime < stale_seconds:
+                    continue
+                queued = edit_dir / "agent_request.json"
+                if not queued.exists():
+                    running.rename(queued)
+                    if source.name == "prompt_jobs":
+                        _update_local_status(edit_dir, "QUEUED", recovery="stale_claim")
+                    recovered += 1
     return recovered
 
 

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -140,8 +143,17 @@ class ManualEditAgentTests(unittest.TestCase):
             agents.write_text("agents:\n  cmr_specialist:\n    provider: mock\n    model: mock\n", encoding="utf-8")
             # Exercise two actual processes, matching the deployed --watch and
             # explicit --job-id entrypoints. No model credentials are needed.
-            import subprocess,sys
             project=Path(__file__).resolve().parents[1]
+            job = work / "prompt_jobs" / queued["job_id"]
+
+            def diagnostics():
+                paths = [root / "watch.log", root / "explicit.log"] + [
+                    job / name for name in ("local_request.json", "agent_error.json",
+                                             "agent_plan.json", "agent_request.json", "claim.json")]
+                return json.dumps({str(path.relative_to(root)): path.read_text(
+                    encoding="utf-8", errors="replace") if path.exists() else "<missing>"
+                    for path in paths}, ensure_ascii=False, indent=2)
+
             command=[sys.executable,"-u",str(project/"scripts/analyze_manual_edit_queue.py"),
                      "--work-root",str(work),"--providers",str(providers),
                      "--agents",str(project/"configs/agents.yaml")]
@@ -149,16 +161,15 @@ class ManualEditAgentTests(unittest.TestCase):
                 watch=subprocess.Popen(command+["--watch","--poll-seconds","1"],cwd=project,stdout=watch_log,stderr=subprocess.STDOUT)
                 try:
                     explicit=subprocess.Popen(command+["--job-id",queued["job_id"]],cwd=project,stdout=explicit_log,stderr=subprocess.STDOUT)
-                    self.assertEqual(explicit.wait(timeout=30),0)
-                    self.assertIsNone(watch.poll())
+                    self.assertEqual(explicit.wait(timeout=30),0,diagnostics())
+                    self.assertIsNone(watch.poll(),diagnostics())
                     claim=json.loads((work/"prompt_jobs"/queued["job_id"]/"claim.json").read_text())
                     self.assertEqual(claim["pid"],explicit.pid)
                 finally:
                     watch.terminate()
                     try:watch.wait(timeout=5)
                     except subprocess.TimeoutExpired:watch.kill();watch.wait(timeout=5)
-            job = work / "prompt_jobs" / queued["job_id"]
-            self.assertTrue((job / "candidate.png").is_file())
+            self.assertTrue((job / "candidate.png").is_file(), diagnostics())
             plan = json.loads((job / "agent_plan.json").read_text())
             self.assertGreaterEqual(plan["planning_latency_ms"], 0)
             self.assertEqual(json.loads((job / "local_request.json").read_text())["status"], "READY")
@@ -169,6 +180,99 @@ class ManualEditAgentTests(unittest.TestCase):
                 "source_hash":meta["source_hashes"]["myo"],"mode":"refine","previous_job_id":queued["job_id"]})
             refined_input=json.loads((work/"prompt_jobs"/refined["job_id"]/"agent_request.json").read_text())
             self.assertEqual(refined_input["operator_instruction"],original["operator_instruction"])
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "claim identity uses Linux /proc")
+    def test_watch_recovery_waits_for_claim_publication(self) -> None:
+        """Hold a real child between rename and claim publication during recovery."""
+        import fcntl
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            work = root / "work"
+            job_id = "20261028T010101_prompt_012345abcd"
+            job = work / "prompt_jobs" / job_id
+            job.mkdir(parents=True)
+            request = {"modality": "cmr", "target": "myo", "operator_instruction": "synthetic prompt"}
+            (job / "agent_request.json").write_text(json.dumps(request), encoding="utf-8")
+            (job / "local_request.json").write_text(json.dumps({
+                "job_id": job_id, "status": "QUEUED", "execution_scope": "interactive_prompt"}), encoding="utf-8")
+            # The executable name preserves the existing /proc worker identity contract.
+            bootstrap = root / "analyze_manual_edit_queue.py"
+            bootstrap.write_text('''
+import json, sys, time
+from pathlib import Path
+mode, root, project, job_id = sys.argv[1:]
+root = Path(root)
+sys.path.insert(0, project)
+from app import prompt_dispatch
+from scripts.analyze_manual_edit_queue import claim_one, recover_stale_claims
+def wait(name):
+    deadline = time.monotonic() + 15
+    while not (root / name).exists():
+        if time.monotonic() >= deadline:
+            raise TimeoutError(name)
+        time.sleep(.01)
+if mode == "claim":
+    original = prompt_dispatch.register_claim
+    def delayed(folder):
+        (root / "claim-window").touch()
+        wait("publish")
+        original(folder)
+    prompt_dispatch.register_claim = delayed
+    claim_one(root / "work", job_id)
+    (root / "claimed").touch()
+    wait("finish")
+else:
+    (root / "recovery-started").touch()
+    result = recover_stale_claims(root / "work", stale_seconds=0)
+    (root / "recovered.json").write_text(json.dumps(result))
+''', encoding="utf-8")
+            project = Path(__file__).resolve().parents[1]
+            children = []
+
+            def wait(name):
+                deadline = time.monotonic() + 15
+                while not (root / name).exists():
+                    self.assertLess(time.monotonic(), deadline, "child marker missing: " + name)
+                    time.sleep(.01)
+
+            with (root / "children.log").open("w", encoding="utf-8") as log:
+                try:
+                    for mode, marker in (("claim", "claim-window"), ("recover", "recovery-started")):
+                        children.append(subprocess.Popen([
+                            sys.executable, "-B", str(bootstrap), mode, str(root), str(project), job_id],
+                            cwd=project, stdout=log, stderr=subprocess.STDOUT))
+                        wait(marker)
+                    self.assertTrue((job / "agent_request.running").exists())
+                    self.assertFalse((job / "claim.json").exists())
+                    with (job / "dispatch.lock").open("a") as handle:
+                        with self.assertRaises(BlockingIOError, msg="rename/publication must hold the job lock"):
+                            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    (root / "publish").touch()
+                    wait("claimed")
+                    self.assertEqual(children[1].wait(timeout=15), 0)
+                    self.assertEqual(json.loads((root / "recovered.json").read_text()), 0)
+                    self.assertEqual(json.loads((job / "agent_request.running").read_text()), request)
+                    self.assertFalse((job / "agent_request.json").exists())
+                    self.assertEqual(json.loads((job / "claim.json").read_text())["pid"], children[0].pid)
+                    (root / "finish").touch()
+                    self.assertEqual(children[0].wait(timeout=15), 0)
+                except Exception as exc:
+                    log.flush()
+                    state = {name: (root / name).read_text() if (root / name).exists() else "<missing>"
+                             for name in ("recovered.json", "claimed")}
+                    raise AssertionError(f"{exc}\n{state}\n" + (
+                        root / "children.log").read_text(errors="replace")) from exc
+                finally:
+                    (root / "publish").touch()
+                    (root / "finish").touch()
+                    for child in children:
+                        if child.poll() is None:
+                            child.terminate()
+                        try:
+                            child.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            child.kill()
+                            child.wait(timeout=5)
 
 
 if __name__ == "__main__":

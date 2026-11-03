@@ -79,6 +79,16 @@ contrast support, component continuity and termination across slices. Propose a 
 never a production label edit. Return only the requested structured object.""",
 }
 
+SEGMENTATION_PLAN_PROMPT = """\nOnly when evidence_summary.segmentation_dispatch.enabled is true, you may return
+segmentation_cycle_plan for your own target, using one EXACT supplied plan_inputs
+entry. Set schema=segmentation-cycle-v1, run_id to the supplied run_id, choose an
+action_id, and set owner and owner_role to your configured specialist role. Do not
+invent paths, hashes, policies, references, commands, approvals or measurements.
+Missing prepared inputs mean segmentation_cycle_plan=null. This optional training
+plan is separate from QC stage routing and cannot alter labels or the QC consumer.
+It still needs supervisor assignment and independent exact-plan implementation
+review; training permission never authorizes activation or reference changes."""
+
 MAINTENANCE_PROMPTS = {
     "workflow_maintainer": "Repair only configs/lge_protocol_aliases.json to map observed transport field aliases to the existing snapshot paths/candidate filename. Propose framework_repair owned by workflow_maintainer. Do not change medical decisions, masks, QC thresholds, evaluators, budgets, permissions, writers or other source. Use protocol_repair evidence and the existing generator source; preserve canonical fields. Unsupported faults must be reported rather than pretending the config can fix them.",
     "qc_code_optimizer": """You optimize deterministic CMR/LGE QC implementation. Propose a
@@ -341,6 +351,13 @@ def select_analysis_roles(evidence: dict[str, Any], analysis: FailureAnalysis) -
     if cycle % 10 == 0 or any(term in failure_text for term in (
             "efficiency", "token", "cost", "latency", "timeout")):
         maintainers.append("efficiency_auditor")
+    segmentation = evidence.get("segmentation_dispatch") or {}
+    if segmentation.get("enabled"):
+        from agents.governance import SEGMENTATION_OWNERS
+        for item in segmentation.get("plan_inputs", []):
+            role = SEGMENTATION_OWNERS.get(item.get("target"))
+            if role and role not in specialists:
+                specialists.append(role)
     return specialists, maintainers
 
 
@@ -354,7 +371,8 @@ def supervisor_output_needs_retry(supervisor: SupervisorDecision,
     return empty_experiment or bool(not candidate_actions and blocked_actions) or autonomy_retry
 
 
-def filter_workflow_actions(actions: list[SupervisorAction], workflow: dict[str, Any]
+def filter_workflow_actions(actions: list[SupervisorAction], workflow: dict[str, Any],
+                            segmentation_context: dict | None = None, specialists: list | None = None
                             ) -> tuple[list[SupervisorAction], list[dict[str, Any]]]:
     current_stage = str(workflow.get("stage") or "")
     allowed: list[SupervisorAction] = []
@@ -364,6 +382,13 @@ def filter_workflow_actions(actions: list[SupervisorAction], workflow: dict[str,
         payload["workflow_stage"] = current_stage
         if workflow.get("protocol_repair_required") and action.action_class != "framework_repair":
             blocked.append({"action_id":action.action_id,"reason":"protocol_repair_before_domain_work"})
+            continue
+        if action.action_class == "segmentation_training":
+            from app.segmentation_dispatch import proposal_allowed
+            if proposal_allowed(payload, segmentation_context or {}, specialists or []):
+                allowed.append(action)
+            else:
+                blocked.append({"action_id": action.action_id, "reason": "segmentation_disabled_or_unbound_owner_plan"})
             continue
         if action.action_class == "framework_repair":
             from app.lge_protocol import action_allowed
@@ -491,7 +516,7 @@ async def run_shadow_analysis(db: Database, run_id: int, provider_config: Path,
                 output = await invoke_traced(
                     db=db, run_id=run_id, thread_id=analysis_thread,
                     role=role, provider_name=cfg["provider"], provider=provider,
-                    system_prompt=SPECIALIST_PROMPTS[role] + "\n" + CONCISE_OUTPUT,
+                    system_prompt=SPECIALIST_PROMPTS[role] + SEGMENTATION_PLAN_PROMPT + "\n" + CONCISE_OUTPUT,
                     input_data=specialist_input,
                     output_schema=SpecialistAssessment,
                     model=cfg["model"],
@@ -595,7 +620,7 @@ async def run_shadow_analysis(db: Database, run_id: int, provider_config: Path,
             db=db, run_id=run_id, thread_id=analysis_thread,
             role="supervisor", provider_name=supervisor_cfg["provider"],
             provider=supervisor_provider,
-            system_prompt=SUPERVISOR_PROMPT + "\n" + CONCISE_OUTPUT,
+            system_prompt=SUPERVISOR_PROMPT + SEGMENTATION_PLAN_PROMPT + "\nFor segmentation_training, copy the owning specialist's typed plan unchanged, including action_id; never assign this to a framework/QC code role.\n" + CONCISE_OUTPUT,
             input_data=supervisor_input,
             output_schema=SupervisorDecision,
             model=supervisor_cfg["model"],
@@ -611,7 +636,7 @@ async def run_shadow_analysis(db: Database, run_id: int, provider_config: Path,
         candidate_actions, executor_blocked = enforce_autonomous_executor_contract(candidate_actions)
         blocked_actions.extend(executor_blocked)
         candidate_actions, workflow_blocked = filter_workflow_actions(
-            candidate_actions, evidence["workflow_dependency"])
+            candidate_actions, evidence["workflow_dependency"], evidence.get("segmentation_dispatch"), specialist_outputs)
         blocked_actions.extend(workflow_blocked)
         autonomy_retry = bool(candidate_actions) and not any(
             action.auto_execute for action in candidate_actions
@@ -645,7 +670,7 @@ async def run_shadow_analysis(db: Database, run_id: int, provider_config: Path,
                 db=db, run_id=run_id, thread_id=analysis_thread,
                 role="supervisor", provider_name=supervisor_cfg["provider"],
                 provider=supervisor_provider,
-                system_prompt=SUPERVISOR_PROMPT + "\n" + CONCISE_OUTPUT,
+                system_prompt=SUPERVISOR_PROMPT + SEGMENTATION_PLAN_PROMPT + "\nFor segmentation_training copy the owning specialist's typed plan unchanged.\n" + CONCISE_OUTPUT,
                 input_data=retry_input, output_schema=SupervisorDecision,
                 model=supervisor_cfg["model"],
             )
@@ -661,7 +686,7 @@ async def run_shadow_analysis(db: Database, run_id: int, provider_config: Path,
             candidate_actions, executor_blocked = enforce_autonomous_executor_contract(candidate_actions)
             blocked_actions.extend(executor_blocked)
             candidate_actions, workflow_blocked = filter_workflow_actions(
-                candidate_actions, evidence["workflow_dependency"])
+                candidate_actions, evidence["workflow_dependency"], evidence.get("segmentation_dispatch"), specialist_outputs)
             blocked_actions.extend(workflow_blocked)
             if autonomy_retry and not candidate_actions:
                 supervisor, candidate_actions = initial_supervisor, initial_candidates
@@ -729,6 +754,10 @@ async def run_shadow_analysis(db: Database, run_id: int, provider_config: Path,
             action_payload = staged_action_payload(action)
             action_payload["review_approved"] = reviewer_accepted
             action_payload["review_decision"] = review.decision
+            action_review = model_dump(review)
+            if action.action_class == "segmentation_training":
+                from app.segmentation_cycle import implementation_sha256
+                action_review["segmentation_plan_sha256"] = implementation_sha256(action_payload["segmentation_cycle_plan"])
             action_thread = f"run-{run_id}:{action.action_id}"
             db.post_agent_message(
                 run_id, thread_id=action_thread, sender_role="supervisor",
@@ -738,7 +767,7 @@ async def run_shadow_analysis(db: Database, run_id: int, provider_config: Path,
             db.post_agent_message(
                 run_id, thread_id=action_thread, sender_role="independent_reviewer",
                 recipient_role=action.owner_role, message_type="action_review",
-                payload=model_dump(review),
+                payload=action_review,
             )
             if action.action_class == "human_review" or not action.auto_execute:
                 action_status = "HUMAN_REQUIRED"
@@ -761,7 +790,7 @@ async def run_shadow_analysis(db: Database, run_id: int, provider_config: Path,
             db.save_agent_scorecard(run_id, role, model_dump(score))
 
         has_bounded_action = any(
-            action.action_class in {"isolated_code_experiment", "rule_draft", "skill_draft"}
+            action.action_class in {"isolated_code_experiment", "rule_draft", "skill_draft", "segmentation_training"}
             for action in candidate_actions
         )
         target = (RunState.EXPERIMENT_PROPOSED
