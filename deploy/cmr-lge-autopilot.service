@@ -1,0 +1,19 @@
+[Unit]
+Description=Persistent CMR+LGE multi-agent autopilot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/srv/rsi/project
+EnvironmentFile=/home/rsi/.config/cmr-lge-workflow/secrets.env
+Environment=PYTHONUNBUFFERED=1
+Environment=CMR_LGE_DATASET=/srv/rsi/dataset
+ExecStart=/srv/rsi/project/scripts/start_autopilot.sh
+Restart=on-failure
+RestartSec=15
+StandardOutput=append:/srv/rsi/project/artifacts/autopilot.log
+StandardError=append:/srv/rsi/project/artifacts/autopilot.log
+
+[Install]
+WantedBy=default.target

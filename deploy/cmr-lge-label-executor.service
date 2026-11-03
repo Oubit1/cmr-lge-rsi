@@ -1,0 +1,29 @@
+[Unit]
+Description=Privileged CMR+LGE staged-label apply executor
+After=local-fs.target
+
+[Service]
+Type=simple
+User=cmr-label-executor
+Group=cmr-label-submitters
+WorkingDirectory=/opt/cmr-lge-label-executor
+RuntimeDirectory=cmr-lge-label-executor
+RuntimeDirectoryMode=0750
+UMask=0117
+ExecStart=/srv/rsi/project/.venv/bin/python -u scripts/label_write_executor.py --socket /run/cmr-lge-label-executor/apply.sock --dataset /srv/rsi/dataset --work-root /srv/rsi/project/runtime/manual_annotations --audit-log /var/log/cmr-lge-label-executor/audit.jsonl
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/srv/rsi/project/runtime/manual_annotations
+ReadWritePaths=/srv/rsi/dataset/labels/cmr_checked
+ReadWritePaths=/srv/rsi/dataset/labels/lge_checked
+ReadWritePaths=/srv/rsi/dataset/labels/check
+ReadWritePaths=/srv/rsi/dataset/label_iteration/manual_edits
+ReadWritePaths=/var/log/cmr-lge-label-executor
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

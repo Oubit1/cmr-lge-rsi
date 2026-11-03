@@ -1,0 +1,12 @@
+{
+  "schema_version": "lge-protocol-v1",
+  "input_aliases": {
+    "snapshot_image_path": "image",
+    "snapshot_mask_path": "label",
+    "snapshot_myo_path": "myo",
+    "snapshot_mi_path": "mi"
+  },
+  "output_candidate_aliases": [
+    "candidate_filename"
+  ]
+}

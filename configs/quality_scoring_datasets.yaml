@@ -1,0 +1,3 @@
+# Private physician-reviewed image/label pairs are not distributed.
+# Copy configs/quality_scoring_datasets.example.yaml and fill local paths.
+datasets: []

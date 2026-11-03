@@ -1,0 +1,45 @@
+agents:
+  supervisor:
+    provider: openai
+    model: ${OPENAI_REVIEW_MODEL}
+    can_write: false
+  failure_triage:
+    provider: aliyun
+    model: ${ALIYUN_TRIAGE_MODEL}
+    can_write: false
+
+  cmr_specialist:
+    provider: aliyun
+    model: ${ALIYUN_CMR_MODEL}
+    can_write: false
+
+  lge_myo_specialist:
+    provider: openai
+    model: ${OPENAI_LGE_MYO_MODEL}
+    can_write: false
+
+  lge_mi_specialist:
+    provider: aliyun
+    model: ${ALIYUN_LGE_MI_MODEL}
+    can_write: false
+
+  independent_reviewer:
+    provider: openai
+    model: ${OPENAI_REVIEW_MODEL}
+    can_write: false
+  qc_code_optimizer:
+    provider: openai
+    model: ${OPENAI_REVIEW_MODEL}
+    can_write: false
+  rule_curator:
+    provider: aliyun
+    model: ${ALIYUN_TRIAGE_MODEL}
+    can_write: false
+  skill_maintainer:
+    provider: openai
+    model: ${OPENAI_REVIEW_MODEL}
+    can_write: false
+  efficiency_auditor:
+    provider: aliyun
+    model: ${ALIYUN_TRIAGE_MODEL}
+    can_write: false

@@ -1,0 +1,45 @@
+agents:
+  supervisor:
+    provider: aliyun
+    model: ${ALIYUN_MODEL}
+    can_write: false
+  failure_triage:
+    provider: aliyun
+    model: ${ALIYUN_MODEL}
+    can_write: false
+
+  cmr_specialist:
+    provider: aliyun
+    model: ${ALIYUN_MODEL}
+    can_write: false
+
+  lge_myo_specialist:
+    provider: aliyun
+    model: ${ALIYUN_MODEL}
+    can_write: false
+
+  lge_mi_specialist:
+    provider: aliyun
+    model: ${ALIYUN_MODEL}
+    can_write: false
+
+  independent_reviewer:
+    provider: aliyun
+    model: ${ALIYUN_MODEL}
+    can_write: false
+  qc_code_optimizer:
+    provider: aliyun
+    model: ${ALIYUN_MODEL}
+    can_write: false
+  rule_curator:
+    provider: aliyun
+    model: ${ALIYUN_MODEL}
+    can_write: false
+  skill_maintainer:
+    provider: aliyun
+    model: ${ALIYUN_MODEL}
+    can_write: false
+  efficiency_auditor:
+    provider: aliyun
+    model: ${ALIYUN_MODEL}
+    can_write: false

@@ -1,0 +1,7 @@
+# Optional intake/inference dependencies. Model implementations and checkpoints
+# must be supplied separately with valid redistribution/use permissions.
+-r requirements.txt
+pydicom>=2.4,<4
+SimpleITK>=2.3,<3
+torch>=2.2
+tqdm>=4.66

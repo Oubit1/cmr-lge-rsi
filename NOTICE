@@ -1,0 +1,5 @@
+CMR/LGE RSI is distributed under the MIT license for the included project source.
+Python and other dependencies retain their respective licenses. No third-party
+model checkpoints or unverified vendored inference implementations are included.
+Medical datasets, physician annotations and historical private artifacts are not
+licensed or distributed by this repository.

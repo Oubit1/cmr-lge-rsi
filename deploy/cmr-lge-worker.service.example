@@ -1,0 +1,16 @@
+[Unit]
+Description=CMR/LGE persistent workflow worker
+After=network-online.target
+
+[Service]
+Type=simple
+User=operator
+WorkingDirectory=/srv/rsi/project
+EnvironmentFile=-/home/rsi/.config/cmr-lge-workflow/secrets.env
+ExecStart=/srv/rsi/project/.venv/bin/python /srv/rsi/project/cli.py worker --poll-seconds 10
+Restart=on-failure
+RestartSec=10
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

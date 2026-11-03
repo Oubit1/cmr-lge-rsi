@@ -1,0 +1,59 @@
+# Safe default: shadow analysis uses the deterministic mock provider and does
+# not create network traffic. Copy this file and change provider/model only
+# after credentials, de-identification and data authorization are configured.
+agents:
+  supervisor:
+    provider: mock
+    model: mock-supervisor
+    can_write: false
+  failure_triage:
+    provider: mock
+    model: mock-triage
+    can_write: false
+
+  cmr_specialist:
+    provider: mock
+    model: mock-cmr-specialist
+    can_write: false
+
+  lge_myo_specialist:
+    provider: mock
+    model: mock-lge-myo-specialist
+    can_write: false
+
+  lge_mi_specialist:
+    provider: mock
+    model: mock-lge-mi-specialist
+    can_write: false
+
+  independent_reviewer:
+    provider: mock
+    model: mock-reviewer
+    can_write: false
+  qc_code_optimizer:
+    provider: mock
+    model: mock-maintainer
+    can_write: false
+    can_write_snapshot: true
+  rule_curator:
+    provider: mock
+    model: mock-maintainer
+    can_write: false
+    can_write_snapshot: true
+  skill_maintainer:
+    provider: mock
+    model: mock-maintainer
+    can_write: false
+    can_write_snapshot: true
+  efficiency_auditor:
+    provider: mock
+    model: mock-maintainer
+    can_write: false
+    can_write_snapshot: true
+
+  workflow_maintainer:
+    provider: mock
+    model: mock-maintainer
+    can_write: false
+    can_write_snapshot: true
+    responsibility: transport_protocol_config_only_no_medical_labels

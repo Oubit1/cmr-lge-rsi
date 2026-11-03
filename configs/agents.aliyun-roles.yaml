@@ -1,0 +1,76 @@
+# Role-specific AliCloud profile.
+# Example profile only; replace model IDs with identifiers available to your
+# provider account. Credentials must come from local environment variables.
+agents:
+  supervisor:
+    provider: aliyun
+    model: qwen3.8-max
+    can_write: false
+    responsibility: final_decision_and_action_prioritization
+
+  failure_triage:
+    provider: aliyun
+    model: qwen3.8-flash
+    can_write: false
+    responsibility: failure_triage_only
+
+  cmr_specialist:
+    provider: aliyun
+    model: qwen3.8-max
+    can_write: false
+    responsibility: cmr_myo_analysis_prompt_repair_and_edit_learning
+
+  lge_myo_specialist:
+    provider: aliyun
+    model: qwen3.8-max
+    can_write: false
+    responsibility: lge_myo_analysis_prompt_repair_and_edit_learning
+
+  lge_mi_specialist:
+    provider: aliyun
+    model: qwen3.8-max
+    can_write: false
+    responsibility: lge_mi_analysis_prompt_repair_and_edit_learning
+
+  independent_reviewer:
+    provider: aliyun
+    model: deepseek-v4-pro
+    can_write: false
+    responsibility: independent_safety_review
+
+  qc_code_optimizer:
+    provider: aliyun
+    model: deepseek-v4-pro
+    # Same owner identity/permissions; use configured alternate on genuine runtime repair.
+    runtime_repair_models: [qwen3.8-max]
+    can_write: false
+    can_write_snapshot: true
+    responsibility: isolated_qc_code_experiments
+
+  rule_curator:
+    provider: aliyun
+    model: qwen3.8-flash
+    can_write: false
+    can_write_snapshot: true
+    responsibility: qc_rule_and_casebook_curation
+
+  skill_maintainer:
+    provider: aliyun
+    model: qwen3.8-flash
+    can_write: false
+    can_write_snapshot: true
+    responsibility: skill_and_handoff_maintenance
+
+  efficiency_auditor:
+    provider: aliyun
+    model: qwen3.8-flash
+    can_write: false
+    can_write_snapshot: true
+    responsibility: efficiency_and_token_audit
+
+  workflow_maintainer:
+    provider: aliyun
+    model: qwen3.8-max
+    can_write: false
+    can_write_snapshot: true
+    responsibility: transport_protocol_config_only_no_medical_labels

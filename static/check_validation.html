@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>check 抽样验收</title>
+<style>
+:root{--bg:#0f1419;--card:#171e26;--line:#2a394b;--fg:#d7e0ea;--dim:#a4b3c4;--blue:#58a6ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 "Times New Roman","Microsoft YaHei",sans-serif}
+header{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;gap:20px;align-items:center}h1{margin:0;font-size:19px}a{color:var(--blue)}main{max-width:1100px;margin:auto;padding:20px}
+.muted{color:var(--dim)}.summary,.case{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px;margin:12px 0}
+.controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0}button,input,select{font:inherit;color:var(--fg);background:#172538;border:1px solid #376298;border-radius:6px;padding:7px 10px}button{cursor:pointer}button:disabled{opacity:.45}input{min-width:180px}
+.case{display:flex;align-items:center;justify-content:space-between;gap:16px}.case strong{word-break:break-all}.selected{border-color:var(--blue)}
+</style></head><body>
+<header><h1>check 抽样验收</h1><a href="/check-inventory">四桶现状</a><a href="/">看板</a></header>
+<main>
+<p class="muted">从预先冻结的留出集按固定规则抽取 20 个 CMR 空间层。这里只记录你的判断，不修改标签或移动样本；系统随后计算分流误判率和覆盖情况。候选建议在提交后显示，避免影响独立判断。</p>
+<div class="summary" id="summary">读取中…</div>
+<div class="controls"><label>审核人 <input id="reviewer" value="local_operator" maxlength="80"></label><label>显示 <select id="filter"><option value="open">未审核</option><option value="all">全部</option></select></label></div>
+<div id="cases"></div>
+</main><script>
+const $=id=>document.getElementById(id),esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const names={checked:'通过',repair:'需要修改',trash:'剔除'};let state=null;
+function draw(){let r=state.report;$('summary').textContent=`已审核 ${r.reviewed}/${r.selected} · 有建议的样本 ${r.suggested} · 误分流 ${r.false_routes} · 95% Wilson 上界 ${r.false_route_wilson_upper_95??'待计算'} · 试验控制闸 ${r.shadow_control_gate}。${r.ready_for_independent_review?'抽样记录完整，可进入下一轮评估。':'请继续审核；未审核完不作为验收结论。'}`;
+ const items=state.items.filter(x=>$('filter').value==='all'||!x.decision);
+ $('cases').innerHTML=items.map(x=>`<div class="case"><div><strong>${esc(x.key)}</strong><div class="muted">${esc(x.stratum)} · ${x.decision?'已判：'+esc(names[x.decision]):'待判'}${x.decision?' · 原建议：'+esc(names[x.suggestion]||'无自动结论'):''}</div>${x.editor_index!==null?`<a href="/editor?pool=cmr_boundary_manifest&index=${Number(x.editor_index)}" target="_blank" rel="noopener">查看图像和标签</a>`:'<span class="muted">当前编辑器无对应入口</span>'}</div><div class="controls">${x.decision?'':Object.entries(names).map(([route,name])=>`<button data-key="${esc(x.key)}" data-route="${route}">${name}</button>`).join('')}</div></div>`).join('')||'<p class="muted">当前筛选下没有样本。</p>';
+ document.querySelectorAll('button[data-key]').forEach(b=>b.onclick=()=>submit(b.dataset.key,b.dataset.route));}
+async function load(){try{const response=await fetch('/api/check-validation',{cache:'no-store'});let data=await response.json();if(!response.ok)throw Error(data.error||response.status);state=data;draw()}catch(e){$('summary').textContent='读取失败：'+e.message}}
+async function submit(key,route){const reviewer=$('reviewer').value.trim();if(!reviewer){alert('请输入审核人');return}let candidate_accepted=null;if(route==='repair'){candidate_accepted=confirm('自动修改候选是否可接受？确定=可接受，取消=不可接受')}const payload={key,route,reviewer,candidate_accepted,plan_sha256:state.plan.plan_sha256};try{const response=await fetch('/api/check-validation',{method:'POST',headers:{'Content-Type':'application/json','X-Requested-With':'cmr-lge-board'},body:JSON.stringify(payload)});let data=await response.json();if(!response.ok)throw Error(data.error||response.status);state=data;draw()}catch(e){alert('提交失败：'+e.message)}}
+ $('filter').onchange=()=>state&&draw();load();
+</script></body></html>

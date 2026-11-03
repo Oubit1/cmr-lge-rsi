@@ -1,0 +1,6 @@
+{
+  "schema_version": "lge-execution-v1",
+  "enabled": false,
+  "dataset": "data/dataset",
+  "note": "Only the resumed check-loop service executes governed LGE candidates. Preview and Codex framework tests do not apply production labels."
+}

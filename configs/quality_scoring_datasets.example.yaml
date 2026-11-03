@@ -1,0 +1,14 @@
+datasets:
+  - name: reviewed_site
+    tier: gold
+    targets:
+      cmr:
+        image_dir: /path/to/reviewed/images/cmr
+        label_dir: /path/to/reviewed/labels/cmr
+      lge_myo:
+        image_dir: /path/to/reviewed/images/lge
+        label_dir: /path/to/reviewed/labels/lge_myo
+      lge_mi:
+        image_dir: /path/to/reviewed/images/lge
+        label_dir: /path/to/reviewed/labels/lge_mi
+        myo_dir: /path/to/reviewed/labels/lge_myo

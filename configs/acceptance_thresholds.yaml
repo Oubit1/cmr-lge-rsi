@@ -1,0 +1,16 @@
+metrics:
+  target_issue_recall:
+    direction: higher
+    min_delta: 0.05
+  myo_dice:
+    direction: higher
+    max_drop: 0.002
+  mi_dice:
+    direction: higher
+    max_drop: 0.003
+  false_repair_rate:
+    direction: lower
+    max_value: 0.01
+  new_critical_qc_issues:
+    direction: lower
+    max_value: 0

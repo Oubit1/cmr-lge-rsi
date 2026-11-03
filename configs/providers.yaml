@@ -1,0 +1,17 @@
+# This file contains environment-variable names, never secret values.
+providers:
+  mock:
+    adapter: mock
+
+  openai:
+    adapter: openai_compatible_chat
+    api_key_env: OPENAI_API_KEY
+    json_mode: true
+
+  aliyun:
+    adapter: openai_compatible_chat
+    api_key_env: DASHSCOPE_API_KEY
+    base_url_env: DASHSCOPE_BASE_URL
+    # Model Studio JSON-mode support differs by model. Pydantic validation and
+    # one correction retry remain active even when this is false.
+    json_mode: false

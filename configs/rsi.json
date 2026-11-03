@@ -1,0 +1,5 @@
+{
+  "schema_version": "rsi-policy-v1",
+  "mode": "observe",
+  "note": "Register a local frozen benchmark before enabling enforce mode."
+}

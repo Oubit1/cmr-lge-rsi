@@ -1,0 +1,16 @@
+{
+  "schema_version": "autonomy-v1",
+  "enabled": false,
+  "heartbeat_timeout": 180,
+  "processing_timeout": 1200,
+  "startup_grace": 30,
+  "restart_cooldown": 120,
+  "max_service_restarts": 3,
+  "note": "Only runs after the operator starts normal workflow. Never lifts operator pause or extends model/action budgets.",
+  "dataset": "data/dataset",
+  "run_limits": {
+    "analyses": 4,
+    "requests": 40,
+    "seconds": 21600
+  }
+}

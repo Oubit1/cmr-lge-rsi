@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>check 四桶现状</title>
+<style>
+:root{--bg:#0f1419;--card:#171e26;--line:#2a394b;--fg:#d7e0ea;--dim:#a4b3c4;--blue:#58a6ff;--warn:#e3aa42}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 "Times New Roman","Microsoft YaHei",sans-serif}
+header{padding:15px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+h1{font-size:19px;margin:0}a{color:var(--blue)}main{max-width:1280px;margin:auto;padding:18px}
+.muted{color:var(--dim)}.counts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:16px 0}
+.count{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px}.count b{display:block;font-size:24px}
+.notice{border-left:3px solid var(--warn);padding:8px 12px;background:var(--card);margin:12px 0}
+.controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:16px 0}
+select,input,button{font:inherit;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:7px 10px}
+input{min-width:230px;flex:1}button{color:var(--blue)}button:disabled{opacity:.45}table{border-collapse:collapse;width:100%}
+th,td{text-align:left;border-bottom:1px solid var(--line);padding:9px 8px;vertical-align:top}th{color:var(--dim);font-weight:500}
+td.key{word-break:break-all}small{color:var(--dim)}.page{display:flex;align-items:center;gap:10px;justify-content:flex-end;margin-top:12px}
+@media(max-width:700px){.counts{grid-template-columns:repeat(2,minmax(0,1fr))}table{font-size:12px}th,td{padding:7px 4px}}
+</style></head><body>
+<header><h1>check 四桶现状</h1><a href="/">返回看板</a><a href="/check-validation">抽样验收</a><span id="stamp" class="muted">读取中…</span></header>
+<main>
+<p class="muted">按当前目录中的 PNG 逐项列出；目录状态是已有流程记录，不代表医学正确性或医生验收。</p>
+<div class="counts" id="counts"></div>
+<div class="notice" id="notice">读取评估状态…</div>
+<div class="controls"><label for="state">分桶</label><select id="state"><option value="">全部</option><option value="pending">待筛</option><option value="work">待处理</option><option value="checked">checked</option><option value="trash">垃圾桶</option></select><label for="search">样本</label><input id="search" type="search" placeholder="按名称筛选"><span id="matched" class="muted"></span></div>
+<table><thead><tr><th>样本</th><th>当前分桶</th><th>来源记录</th><th>试验线索（非裁定）</th></tr></thead><tbody id="items"></tbody></table>
+<div class="page"><button id="prev" type="button">上一页</button><span id="page-label"></span><button id="next" type="button">下一页</button></div>
+</main><script>
+const $=id=>document.getElementById(id), esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const names={pending:'待筛',work:'待处理',checked:'checked',trash:'垃圾桶'};
+let snapshot={rows:[],counts:{}}, page=0;const size=50;
+function signals(r){let parts=[];if(r.shadow_boundary===true)parts.push('空间边界候选（未通过控制闸）');if(r.candidate_frames)parts.push(`像素候选 ${r.candidate_frames} 帧`);if(r.quality_delta!==null&&r.quality_delta!==undefined)parts.push(`质量分变化 ${Number(r.quality_delta)>=0?'+':''}${r.quality_delta}`);return parts.join('；')||'无已验证的逐项结论'}
+function render(){const q=$('search').value.trim().toLowerCase(),s=$('state').value;
+ const rows=snapshot.rows.filter(r=>(!s||r.state===s)&&(!q||r.key.toLowerCase().includes(q)));
+ const pages=Math.max(1,Math.ceil(rows.length/size));page=Math.min(page,pages-1);
+ $('matched').textContent=`匹配 ${rows.length} 项`;$('page-label').textContent=`${page+1} / ${pages}`;
+ $('prev').disabled=page===0;$('next').disabled=page>=pages-1;
+ $('items').innerHTML=rows.slice(page*size,(page+1)*size).map(r=>`<tr><td class="key">${esc(r.key)}<br><small>${esc(r.modality.toUpperCase())}</small></td><td>${esc(names[r.state])}</td><td>${esc(r.source)}</td><td>${esc(signals(r))}</td></tr>`).join('')||'<tr><td colspan="4">没有匹配项</td></tr>';
+}
+async function load(){try{const response=await fetch('/api/check-inventory',{cache:'no-store'});if(!response.ok)throw Error(response.status);snapshot=await response.json();
+ $('stamp').textContent=`实时读取 ${new Date(snapshot.generated_at).toLocaleString('zh-CN')} · 共 ${snapshot.total} 项`;
+ $('counts').innerHTML=Object.entries(names).map(([key,label])=>`<div class="count"><span>${label}</span><b>${snapshot.counts[key]||0}</b></div>`).join('');
+ $('notice').textContent=`${snapshot.note}。自动应用 ${snapshot.auto_apply?.applied||0} 项。${snapshot.shadow_current?'影子评估 '+snapshot.shadow_created_at+'，空间边界闸 '+snapshot.shadow_control_gate+'。':'当前影子候选快照尚未与目录同步。'} checked 表示流程晋升，不等于逐项医生验证。`;
+ render();}catch(e){$('notice').textContent=`读取失败：${e.message}`}}
+ $('state').addEventListener('change',()=>{page=0;render()});$('search').addEventListener('input',()=>{page=0;render()});
+ $('prev').addEventListener('click',()=>{page--;render()});$('next').addEventListener('click',()=>{page++;render()});
+ load();setInterval(load,30000);
+</script></body></html>

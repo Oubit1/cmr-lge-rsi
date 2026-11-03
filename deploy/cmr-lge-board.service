@@ -1,0 +1,13 @@
+[Unit]
+Description=CMR+LGE local review board
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/srv/rsi/project
+ExecStart=/bin/bash scripts/start_board.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
