@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 
-FAST_QC = (Path(__file__).resolve().parents[2] / "skills/cmr-lge-label-qc-workflow"
+FAST_QC = (Path(__file__).resolve().parents[1] / "skills/cmr-lge-label-qc-workflow"
            / "tools/apply_cmr_qc_fast.py")
 
 
