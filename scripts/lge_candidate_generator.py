@@ -7,9 +7,9 @@ holdout, apply and audit.
 
 Contract: generate_candidates(data: dict, output_dir: str) -> list[dict]
 """
-
 from __future__ import annotations
 
+import copy
 import json
 import os
 from typing import Any, Dict, List, Optional
@@ -17,34 +17,21 @@ from typing import Any, Dict, List, Optional
 import nibabel as nib
 import numpy as np
 
-# ---------------------------------------------------------------------------
-# helpers
-# ---------------------------------------------------------------------------
-
-
 def _ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
-
 
 def _load_nifti(path: str) -> np.ndarray:
     """Return a numpy array from a NIfTI file."""
     img = nib.load(path)
     return np.asarray(img.dataobj, dtype=np.int16)
 
-
 def _save_nifti(data: np.ndarray, affine: np.ndarray, path: str) -> None:
     """Write a binary int16 NIfTI file."""
     img = nib.Nifti1Image(data.astype(np.int16), affine)
     nib.save(img, path)
 
-
 def _structure_for_ndim(ndim: int, connectivity: int = 8) -> np.ndarray:
-    """Return a connectivity structure array whose rank matches *ndim*.
-
-    For 2-D masks a (3,3) cross is returned; for 3-D masks a (3,3,3)
-    cross is returned.  This avoids the scipy ``RuntimeError: structure
-    and input must have equal rank``.
-    """
+    """Return a connectivity structure whose rank matches the mask."""
     if ndim == 2:
         return np.ones((3, 3), dtype=bool)
     if ndim == 3:
@@ -52,16 +39,10 @@ def _structure_for_ndim(ndim: int, connectivity: int = 8) -> np.ndarray:
     shape = tuple([3] * ndim)
     return np.ones(shape, dtype=bool)
 
-
 def _connected_component_count(mask: np.ndarray, connectivity: int = 8) -> int:
-    """Return the number of connected components in a binary mask.
-
-    Uses scipy.ndimage.label when available; falls back to a simple
-    flood-fill for 2-D slices.
-    """
+    """Count components using scipy or the parent's 2-D flood-fill."""
     try:
         from scipy.ndimage import label as scipy_label
-
         structure = _structure_for_ndim(mask.ndim, connectivity)
         labeled, n = scipy_label(mask > 0, structure=structure)
         return n
@@ -89,12 +70,10 @@ def _connected_component_count(mask: np.ndarray, connectivity: int = 8) -> int:
                                         stack.append((nr, nc))
         return count
 
-
 def _largest_component(mask: np.ndarray, connectivity: int = 8) -> np.ndarray:
     """Return a binary mask containing only the largest connected component."""
     try:
         from scipy.ndimage import label as scipy_label
-
         structure = _structure_for_ndim(mask.ndim, connectivity)
         labeled, n = scipy_label(mask > 0, structure=structure)
         if n == 0:
@@ -133,162 +112,139 @@ def _largest_component(mask: np.ndarray, connectivity: int = 8) -> np.ndarray:
                         best_mask = comp.astype(np.int16)
         return best_mask
 
+def _snapshot_path(rec: dict, name: str) -> Optional[str]:
+    paths = rec.get('paths')
+    paths = paths if isinstance(paths, dict) else {}
+    alias = 'mask' if name == 'label' else name
+    path = paths.get(name) or rec.get(f'snapshot_{alias}_path')
+    return path if isinstance(path, str) and path else None
 
-# ---------------------------------------------------------------------------
-# public entrypoint
-# ---------------------------------------------------------------------------
-
+def _acceptance_reason(mask: np.ndarray, profile: Any) -> Optional[str]:
+    # Training evidence: n=4859, holes q01=q99=1; no reference answers.
+    # Scope this prior explicitly: generic single-component masks need not ring.
+    if not isinstance(profile, dict):
+        return None
+    targets = profile.get('targets')
+    target = targets.get('lge_myo') if isinstance(targets, dict) else None
+    if not isinstance(target, dict):
+        return None
+    metrics = target.get('metrics')
+    holes = metrics.get('holes') if isinstance(metrics, dict) else None
+    if not isinstance(holes, dict) or holes.get('q01') != 1 or holes.get('q99') != 1:
+        return None
+    squeezed = np.squeeze(mask > 0)
+    planes = ([squeezed] if squeezed.ndim == 2 else
+              [mask[:, :, z] > 0 for z in range(mask.shape[2])])
+    for plane in planes:
+        if not plane.any():
+            continue
+        count = _connected_component_count(np.pad(~plane, 1, constant_values=True)) - 1
+        if count != 1:
+            return f'myo_single_component_cavity_review:holes={count}'
+    return None
 
 def generate_candidates(data: dict, output_dir: str) -> list[dict]:
-    """Generate repair / accept_existing / needs_review proposals.
-
-    Parameters
-    ----------
-    data : dict
-        Must contain a "records" key with a list of record dicts.
-        Each record must have at least:
-          - case_id : str
-          - snapshot_image_path : str   (NIfTI image)
-          - snapshot_mask_path  : str   (NIfTI mask)
-        Optional keys:
-          - issue_codes : list[str]
-          - measurements : dict
-    output_dir : str
-        Directory where candidate NIfTI files are written.
-
-    Returns
-    -------
-    list[dict]
-        One dict per record with keys:
-          - case_id
-          - decision : "repair" | "accept_existing" | "needs_review"
-          - reason : str
-          - candidate_filename : str | None   (relative to output_dir, only for repair)
-    """
-    records: List[Dict[str, Any]] = data.get("records", []) if isinstance(data, dict) else []
-    _ensure_dir(output_dir)
-
+    """Read snapshots; return one disposition per record, writing only repairs."""
+    records: List[Dict[str, Any]] = data.get('records', []) if isinstance(data, dict) else []
+    if not isinstance(data, dict) or not isinstance(records, list):
+        return []
+    stage = data.get('workflow_stage', 'lge_myo')
+    sources = {os.path.realpath(p) for rec in records if isinstance(rec, dict)
+               for name in ('image', 'label', 'myo', 'mi')
+               for p in [_snapshot_path(rec, name)] if p}
     results: List[Dict[str, Any]] = []
-
-    for rec in records:
-        case_id = rec.get("case_id", "unknown")
-        image_path = rec.get("snapshot_image_path")
-        mask_path = rec.get("snapshot_mask_path")
-        issue_codes = rec.get("issue_codes") or []
-        measurements = rec.get("measurements") or {}
-
+    for index, raw_rec in enumerate(records):
+        rec = raw_rec if isinstance(raw_rec, dict) else {}
+        case_id = rec.get('case_id', 'unknown')
+        result = dict(case_id=case_id, decision='needs_review',
+                      reason='empty_mask', candidate_filename=None)
+        results.append(result)
+        if stage not in ('lge_myo', 'lge_mi') or not isinstance(raw_rec, dict):
+            result['reason'] = 'unsupported_input'
+            continue
+        image_path = _snapshot_path(rec, 'image')
+        mask_path = _snapshot_path(rec, 'label')
+        measurements = rec.get('measurements') or {}
+        measurements = measurements if isinstance(measurements, dict) else {}
         if not image_path or not mask_path:
-            results.append(
-                {
-                    "case_id": case_id,
-                    "decision": "needs_review",
-                    "reason": "missing_snapshot_paths",
-                    "candidate_filename": None,
-                }
-            )
+            result['reason'] = 'missing_snapshot_paths'
             continue
-
-        if not os.path.isfile(image_path) or not os.path.isfile(mask_path):
-            results.append(
-                {
-                    "case_id": case_id,
-                    "decision": "needs_review",
-                    "reason": "snapshot_file_not_found",
-                    "candidate_filename": None,
-                }
-            )
-            continue
-
         try:
+            if not os.path.isfile(image_path) or not os.path.isfile(mask_path):
+                result['reason'] = 'snapshot_file_not_found'
+                continue
             mask = _load_nifti(mask_path)
             image = _load_nifti(image_path)
             img_obj = nib.load(image_path)
-            affine = img_obj.affine
-        except Exception as exc:
-            results.append(
-                {
-                    "case_id": case_id,
-                    "decision": "needs_review",
-                    "reason": f"nifti_load_error:{exc}",
-                    "candidate_filename": None,
-                }
-            )
-            continue
-
-        components = _connected_component_count(mask > 0)
-        myo_components_meas = measurements.get("myo_components")
-
-        if components == 1:
-            results.append(
-                {
-                    "case_id": case_id,
-                    "decision": "accept_existing",
-                    "reason": "single_component_mask",
-                    "candidate_filename": None,
-                }
-            )
-            continue
-
-        if components > 1:
-            repaired = _largest_component(mask > 0)
-            candidate_filename = f"{case_id}_repaired.nii.gz"
-            candidate_path = os.path.join(output_dir, candidate_filename)
-            try:
-                _save_nifti(repaired, affine, candidate_path)
-            except Exception as exc:
-                results.append(
-                    {
-                        "case_id": case_id,
-                        "decision": "needs_review",
-                        "reason": f"candidate_write_error:{exc}",
-                        "candidate_filename": None,
-                    }
-                )
+            mask_obj = nib.load(mask_path)
+            affine = mask_obj.affine
+            if mask.ndim not in (2, 3) or not all(mask.shape) or image.shape != mask.shape:
+                raise ValueError('unsupported_snapshot_shape')
+            if not np.allclose(img_obj.affine, affine, rtol=0, atol=1e-5):
+                raise ValueError('snapshot_affine_mismatch')
+            pair_path = _snapshot_path(rec, 'mi' if stage == 'lge_myo' else 'myo')
+            if pair_path:
+                pair = _load_nifti(pair_path)
+                pair_obj = nib.load(pair_path)
+                if pair.shape != mask.shape or not np.allclose(
+                        pair_obj.affine, affine, rtol=0, atol=1e-5):
+                    raise ValueError('paired_snapshot_geometry_mismatch')
+            components = _connected_component_count(mask > 0)
+            if components == 1:
+                reason = (_acceptance_reason(mask, data.get('calibration_profile'))
+                          if stage == 'lge_myo' else None)
+                result.update(decision='needs_review' if reason else 'accept_existing',
+                              reason=reason or 'single_component_mask')
                 continue
-
-            reason = (
-                f"repaired_multiple_components:original_components={components}"
-            )
-            if myo_components_meas is not None:
-                reason += f",measured_myo_components={myo_components_meas}"
-
-            results.append(
-                {
-                    "case_id": case_id,
-                    "decision": "repair",
-                    "reason": reason,
-                    "candidate_filename": candidate_filename,
-                }
-            )
+            if components == 0:
+                continue
+            repaired = _largest_component(mask > 0)
+        except Exception as exc:
+            result['reason'] = f'nifti_load_error:{exc}'
             continue
-
-        results.append(
-            {
-                "case_id": case_id,
-                "decision": "needs_review",
-                "reason": "empty_mask",
-                "candidate_filename": None,
-            }
-        )
-
+        candidate_filename = f'candidate_{index:06d}_repaired.nii.gz'
+        try:
+            candidate_path = os.path.realpath(os.path.join(output_dir, candidate_filename))
+            root = os.path.realpath(output_dir)
+            if os.path.commonpath([root, candidate_path]) != root or candidate_path in sources:
+                raise ValueError('candidate_path_conflicts_with_snapshot_boundary')
+            _ensure_dir(output_dir)
+            _save_nifti(repaired, affine, candidate_path)
+        except Exception as exc:
+            result['reason'] = f'candidate_write_error:{exc}'
+            continue
+        reason = f'repaired_multiple_components:original_components={components}'
+        myo_components_meas = measurements.get('myo_components')
+        if myo_components_meas is not None:
+            reason += f',measured_myo_components={myo_components_meas}'
+        result.update(decision='repair', reason=reason, candidate_filename=candidate_filename)
     return results
 
-
-# ---------------------------------------------------------------------------
-# CLI entrypoint for production replay gate
-# ---------------------------------------------------------------------------
-
+def run_evaluation(data: dict) -> dict:
+    """Pure measurement report; snapshot fitness requires controller replay."""
+    records = copy.deepcopy(data.get('records', []))
+    for rec in records:
+        rec.update(decision='needs_review', reason='snapshot_replay_not_executed')
+    return {
+        'workflow_stage': data.get('workflow_stage'), 'records': records, 'status': 'UNAVAILABLE',
+        'reason': 'independent_snapshot_replay_required',
+        'coverage': {'input_records': len(records), 'snapshot_replays': 0},
+        'decision_counts': {'repair': 0, 'accept_existing': 0, 'needs_review': len(records)},
+        'frozen_split': copy.deepcopy(data.get('frozen_split') or {'status': 'UNAVAILABLE'}),
+        'holdout_excluded': 0, 'production_writes': 0, 'candidate_writes': 0,
+        'metrics': {'defect_false_acceptance': None, 'clean_acceptance': None,
+                    'concordance': None, 'precision': None, 'ci': None},
+        'limitations': ['Measurements alone cannot establish mask correctness or non-regression.'],
+    }
 
 def main() -> None:
     """Thin CLI that reads JSON from stdin and prints JSON to stdout."""
     import sys
-
     raw = sys.stdin.read()
     data = json.loads(raw) if raw.strip() else {}
-    output_dir = data.get("output_dir", "output/candidates")
+    output_dir = data.get('output_dir', 'output/candidates')
     results = generate_candidates(data, output_dir)
     print(json.dumps(results, indent=2, sort_keys=True))
 
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
