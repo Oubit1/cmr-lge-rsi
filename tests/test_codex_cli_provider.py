@@ -15,6 +15,15 @@ from providers.registry import ProviderRegistry
 
 
 class CodexCliProviderTests(unittest.TestCase):
+    def setUp(self):
+        # Regression runs may inherit a real migration trace path.
+        # Synthetic provider events must never append to production telemetry.
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        trace = patch.dict(os.environ, {"CMR_LGE_AGENT_CALL_LOG": str(Path(temporary.name) / "calls.jsonl")})
+        trace.start()
+        self.addCleanup(trace.stop)
+
     def test_structured_invocation_args_schema_and_telemetry(self):
         output = {"failure_type": "myo_topology", "affected_modalities": ["lge"],
                   "evidence_cases": [], "hypothesis": "h", "suggested_experiment": "e",

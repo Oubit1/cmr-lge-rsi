@@ -96,11 +96,40 @@ class BoundedTrialTests(unittest.TestCase):
             p.db.update_maintenance_action(run,'g',status='REJECTED',artifact_path=work)
             a.write_json(work/'autopilot_validation.json',{'passed':False,'checks':[{'returncode':1,'stderr':'synthetic failing interface fixture'}]})
             record={'run_id':run,'steps':4,'status':'COMPLETE'}
-            with patch.object(a,'ROOT',root),patch.object(a,'action_attempts',return_value=2):
+            with patch.object(a,'ROOT',root),patch.object(a,'action_attempts',return_value=2),patch('agents.governance.original_action_approved',return_value=True):
                 self.assertTrue(p.reopen_bounded_validation_failure(record))
             self.assertEqual('APPROVED',p.db.get_maintenance_action(run,'g')['status'])
             self.assertIn('synthetic failing interface fixture',p.db.agent_inbox(run,'qc_code_optimizer')[0]['payload']['failure_reasons'][0])
             p.analyze_new_snapshot.assert_not_called()
+
+    def test_first_validation_failure_reflows_only_with_original_review(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);p=self.pilot()
+            work=root/'runtime/maintenance/run_000999/attempt';work.mkdir(parents=True)
+            a.write_json(work/'autopilot_validation.json',{'passed':False,'checks':[{'returncode':1,'stderr':'fixture conflict'}]})
+            p.db.run_details.return_value={'maintenance_actions':[{'action_id':'x','owner_role':'qc_code_optimizer',
+                'status':'REJECTED','artifact_path':str(work),'payload_json':json.dumps({'max_attempts':3})}]}
+            p.claim_bounded_owner_repair=Mock(return_value=True)
+            with patch.object(a,'ROOT',root),patch('agents.governance.original_action_approved',return_value=False):
+                self.assertFalse(p.reopen_bounded_validation_failure({'run_id':999}))
+            p.claim_bounded_owner_repair.assert_not_called()
+            with patch.object(a,'ROOT',root),patch('agents.governance.original_action_approved',return_value=True):
+                self.assertTrue(p.reopen_bounded_validation_failure({'run_id':999}))
+            self.assertEqual(p.claim_bounded_owner_repair.call_args.args[2]['failure_reasons'],['fixture conflict'])
+
+    def test_validation_repair_continues_without_rebuying_analysis(self):
+        with tempfile.TemporaryDirectory() as d, patch.object(a,'global_promotion_preflight',return_value={}):
+            p=self.pilot();path=Path(d)/'trial.json'
+            def reflow(record):
+                if record['steps']==1:
+                    record['status']='ACTIONS'
+                    return True
+                return False
+            p.reopen_bounded_validation_failure=Mock(side_effect=reflow)
+            p.bounded_run(path)
+            self.assertEqual(p.process_actions.call_count,2)
+            p.analyze_new_snapshot.assert_called_once_with(None)
+            self.assertEqual(json.loads(path.read_text())['status'],'COMPLETE')
 
     def test_failed_executor_test_cannot_be_overridden_by_ready_boolean(self):
         self.assertFalse(a.owner_result_ready_for_validation({'ready_for_validation':True,'tests_passed':False},{}))

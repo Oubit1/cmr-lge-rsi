@@ -1495,13 +1495,16 @@ class Autopilot:
         return self.claim_bounded_owner_repair(record, row, feedback)
 
     def reopen_bounded_validation_failure(self, record: dict) -> bool:
-        """An uninstalled runtime-repair snapshot can use remaining approved attempts."""
+        """Return a failed approved snapshot to its owner within the original limits."""
+        from agents.governance import original_action_approved
         run_id = record.get("run_id")
         if not run_id:
             return False
         for row in self.db.run_details(run_id)["maintenance_actions"]:
             payload = json.loads(row["payload_json"])
-            if row["status"] != "REJECTED" or not payload.get("runtime_failure_feedback") or not row.get("artifact_path"):
+            if row["status"] != "REJECTED" or not row.get("artifact_path"):
+                continue
+            if not original_action_approved(self.db, run_id, row, payload):
                 continue
             workspace = Path(row["artifact_path"]).resolve()
             if not workspace.is_relative_to((ROOT / "runtime/maintenance" / f"run_{run_id:06d}").resolve()):
@@ -1639,6 +1642,8 @@ class Autopilot:
             record["actions"] = [{"action_id": r["action_id"], "status": r["status"]} for r in rows]
             record["status"] = ("FAILED" if outcome.get("recovery_required")
                                 else "ACTIONS" if active else "COMPLETE")
+            if record["status"] == "COMPLETE":
+                self.reopen_bounded_validation_failure(record)
             write_json(record_path, record)
             if record["status"] != "ACTIONS":
                 break
@@ -1660,6 +1665,12 @@ class Autopilot:
             run_id=run["run_id"]
             path=ROOT/"runtime/autonomy"/f"validation_repair_run_{run_id:06d}.json"
             record=read_json(path,{"run_id":run_id,"dataset":str(self.dataset),"steps":0,"status":"COMPLETE"})
+            if self.reopen_bounded_validation_failure(record):
+                write_json(path,record)
+                self.process_actions(run_id)
+                record["steps"]=int(record.get("steps",0))+1
+                write_json(path,record)
+                return True
             for row in self.db.run_details(run_id)["maintenance_actions"]:
                 payload=json.loads(row["payload_json"])
                 from agents.governance import original_action_approved
