@@ -8,6 +8,7 @@ import yaml
 from providers.base import ModelProvider
 from providers.mock import MockProvider
 from providers.openai_compatible import OpenAICompatibleProvider
+from providers.codex_cli import CodexCliProvider
 
 
 class ProviderRegistry:
@@ -31,6 +32,9 @@ class ProviderRegistry:
                 base_url_env=item.get("base_url_env"),
                 json_mode=bool(item.get("json_mode", False)),
             )
+        elif adapter == "codex_cli":
+            provider = CodexCliProvider(name=name, binary_env=item.get("binary_env", "CODEX_CLI_PATH"),
+                                        reasoning_effort=item.get("reasoning_effort"))
         else:
             raise KeyError(f"unknown provider or adapter: {name}/{adapter}")
         self._providers[name] = provider

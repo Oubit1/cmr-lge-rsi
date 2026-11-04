@@ -1,0 +1,62 @@
+# Available models verified via official account model/list on 2026-11-04.
+agents:
+  supervisor:
+    provider: codex_reasoning
+    model: gpt-6.1-sol
+    can_write: false
+    responsibility: final_decision_and_action_prioritization
+  failure_triage:
+    provider: codex_routine
+    model: gpt-6-luna
+    can_write: false
+    responsibility: failure_triage_only
+  cmr_specialist:
+    provider: codex_reasoning
+    model: gpt-6.1-sol
+    can_write: false
+    responsibility: cmr_myo_analysis_prompt_repair_and_edit_learning
+  lge_myo_specialist:
+    provider: codex_reasoning
+    model: gpt-6.1-sol
+    can_write: false
+    responsibility: lge_myo_analysis_prompt_repair_and_edit_learning
+  lge_mi_specialist:
+    provider: codex_reasoning
+    model: gpt-6.1-sol
+    can_write: false
+    responsibility: lge_mi_analysis_prompt_repair_and_edit_learning
+  independent_reviewer:
+    provider: codex_reasoning
+    model: gpt-6-astra
+    can_write: false
+    responsibility: independent_safety_review
+  qc_code_optimizer:
+    provider: codex_reasoning
+    model: gpt-6.1-sol
+    can_write: false
+    can_write_snapshot: true
+    responsibility: isolated_qc_code_experiments
+  rule_curator:
+    provider: codex_routine
+    model: gpt-6-luna
+    can_write: false
+    can_write_snapshot: true
+    responsibility: qc_rule_and_casebook_curation
+  skill_maintainer:
+    provider: codex_routine
+    model: gpt-6-luna
+    can_write: false
+    can_write_snapshot: true
+    responsibility: skill_and_handoff_maintenance
+  efficiency_auditor:
+    provider: codex_routine
+    model: gpt-6-luna
+    can_write: false
+    can_write_snapshot: true
+    responsibility: efficiency_and_token_audit
+  workflow_maintainer:
+    provider: codex_reasoning
+    model: gpt-6.1-sol
+    can_write: false
+    can_write_snapshot: true
+    responsibility: transport_protocol_config_only_no_medical_labels

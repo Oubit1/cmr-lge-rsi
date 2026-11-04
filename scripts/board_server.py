@@ -428,10 +428,8 @@ def maintenance_chat(messages: list[dict], snapshot: dict | None = None) -> dict
             cleaned.append({"role": role, "content": content[:5000]})
     if not cleaned or cleaned[-1]["role"] != "user":
         raise ValueError("最后一条消息必须来自用户")
-    key = os.environ.get("DASHSCOPE_API_KEY")
-    base = os.environ.get("DASHSCOPE_BASE_URL")
-    if not (key and base):
-        raise ValueError("Qwen 模型凭据未配置")
+    from app.board_provider import generate_reply, subscription_active
+    subscription = subscription_active("workflow_maintainer", ROOT)
     context = maintenance_chat_context(snapshot)
     model = (os.environ.get("ALIYUN_MAINTENANCE_CHAT_MODEL")
              or os.environ.get("ALIYUN_TRIAGE_MODEL")
@@ -445,14 +443,37 @@ def maintenance_chat(messages: list[dict], snapshot: dict | None = None) -> dict
         "回答使用简体中文，先给结论，再给证据与下一步；避免堆砌细节。"
     )
     started = time.monotonic()
-    body = json.dumps({
-        "model": model,
-        "messages": [
+    request_messages = [
             {"role": "system", "content": system},
             {"role": "system", "content": "当前去标识化控制面状态：" + json.dumps(
                 context, ensure_ascii=False, separators=(",", ":"))},
             *cleaned,
-        ],
+        ]
+    if subscription:
+        result = generate_reply("workflow_maintainer", request_messages, root=ROOT, timeout=150,
+                                budget_callback=lambda: None, task_prompt=system)
+        # This explicit UI request has its own single-invocation limit; the
+        # automatic workflow may remain paused while the user diagnoses it.
+        reply = str(result["choices"][0]["message"].get("content") or "").strip()
+        elapsed = round(time.monotonic() - started, 1)
+        usage = result.get("usage") or {}
+        model = result["model"]
+        with MAINTENANCE_CHAT_LOCK:
+            MAINTENANCE_CHAT_AUDIT.parent.mkdir(parents=True, exist_ok=True)
+            with MAINTENANCE_CHAT_AUDIT.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps({"timestamp": datetime.now(timezone.utc).isoformat(),
+                    "model": model, "request_sha256": hashlib.sha256(cleaned[-1]["content"].encode()).hexdigest(),
+                    "elapsed_seconds": elapsed, "total_tokens": usage.get("total_tokens"),
+                    "boundary": "control_plane_only", "scope": "interactive_maintenance"}) + "\n")
+        return {"reply": reply, "model": model, "worked_for": elapsed,
+                "usage": usage, "boundary": MAINTENANCE_CHAT_BOUNDARY}
+    key = os.environ.get("DASHSCOPE_API_KEY")
+    base = os.environ.get("DASHSCOPE_BASE_URL")
+    if not (key and base):
+        raise ValueError("Qwen 模型凭据未配置")
+    body = json.dumps({
+        "model": model,
+        "messages": request_messages,
         "max_tokens": 2200,
     }).encode("utf-8")
     req = urllib.request.Request(
@@ -777,6 +798,11 @@ def translate_texts(texts: list, brief: bool = False) -> list:
             out[i] = _trans_cache[digest]
         else:
             todo.append((i, digest, text))
+    from app.board_provider import subscription_active
+    if todo and subscription_active("efficiency_auditor", ROOT):
+        for i, _, text in todo:
+            out[i] = text
+        return out
     key = os.environ.get("DASHSCOPE_API_KEY")
     base = os.environ.get("DASHSCOPE_BASE_URL")
     if todo and key and base:
@@ -909,6 +935,9 @@ def _fallback_brief(f: dict):
 
 
 def _llm_brief(facts: dict):
+    from app.board_provider import subscription_active
+    if subscription_active("efficiency_auditor", ROOT):
+        return None, None
     key = os.environ.get("DASHSCOPE_API_KEY")
     base = os.environ.get("DASHSCOPE_BASE_URL")
     if not (key and base):

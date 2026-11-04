@@ -1,0 +1,7 @@
+providers:
+  codex_routine:
+    adapter: codex_cli
+    reasoning_effort: low
+  codex_reasoning:
+    adapter: codex_cli
+    reasoning_effort: high
