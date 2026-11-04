@@ -1562,7 +1562,8 @@ class Autopilot:
         if record.get("status") != "COMPLETE":
             raise ValueError("extension requires an ended unextended trial")
         rows = [r for r in self.db.run_details(record["run_id"])["maintenance_actions"]
-                if r["status"] == "HUMAN_REQUIRED" and json.loads(r["payload_json"]).get("runtime_failure_feedback")]
+                if (r["status"] == "HUMAN_REQUIRED" and json.loads(r["payload_json"]).get("runtime_failure_feedback"))
+                or (r["status"] == "REJECTED" and r.get("artifact_path"))]
         if len(rows) != 1:
             raise ValueError("extension requires one exhausted runtime-repair action")
         row = rows[0]
@@ -1572,13 +1573,21 @@ class Autopilot:
         if str(workspace) in record.get("budget_extension_snapshots", []):
             raise ValueError("this failed snapshot already received an operator extension")
         result = read_json(workspace / "maintenance_manifest.json", {}).get("result", {})
-        if result.get("tests_passed") is not False:
+        validation = read_json(workspace / "autopilot_validation.json", {})
+        failed_checks = [c for c in validation.get("checks", []) if c.get("returncode") not in (None, 0)]
+        rejected_validation = row["status"] == "REJECTED" and validation.get("passed") is False and bool(failed_checks)
+        if rejected_validation:
+            from agents.governance import original_action_approved
+            if not original_action_approved(self.db, record["run_id"], row, json.loads(row["payload_json"])):
+                raise ValueError("extension requires original action approval")
+        if result.get("tests_passed") is not False and not rejected_validation:
             raise ValueError("extension requires actual executor test failure")
         payload = json.loads(row["payload_json"])
         previous = int(payload.get("max_attempts", 1))
         if action_attempts(record["run_id"], row["action_id"]) != previous:
             raise ValueError("original attempt budget is not exactly exhausted")
-        failure = (workspace / "test_output.log").read_text(encoding="utf-8")[-6000:]
+        failure = ("\n".join(c.get("stdout", "") + c.get("stderr", "") for c in failed_checks)[-6000:]
+                   if rejected_validation else (workspace / "test_output.log").read_text(encoding="utf-8")[-6000:])
         payload["max_attempts"] = previous + 1
         with self.db.connect() as connection:
             cursor = connection.execute("UPDATE maintenance_actions SET payload_json=? WHERE run_id=? AND action_id=? AND payload_json=?",

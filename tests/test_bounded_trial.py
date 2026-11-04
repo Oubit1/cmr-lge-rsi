@@ -152,3 +152,25 @@ class BoundedTrialTests(unittest.TestCase):
             self.assertEqual(2,p.db.get_maintenance_action(run,'g')['payload']['max_attempts'])
             self.assertEqual('APPROVED',p.db.get_maintenance_action(run,'g')['status'])
             p.analyze_new_snapshot.assert_not_called();p.process_actions.assert_not_called()
+
+    def test_explicit_extension_for_failed_full_validation_retains_review_and_limits(self):
+        from app.database import Database
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);p=self.pilot();p.db=Database(root/'workflow.sqlite');p.db.initialize()
+            run=p.db.create_run(p.db.register_dataset('test',root/'data'),'analysis',{})
+            work=root/'runtime/maintenance'/f'run_{run:06d}'/'failed';work.mkdir(parents=True)
+            p.db.save_maintenance_action(run,{'action_id':'g','owner_role':'qc_code_optimizer','action_class':'isolated_code_experiment',
+                'max_attempts':1,'review_approved':True},status='REJECTED')
+            p.db.update_maintenance_action(run,'g',status='REJECTED',artifact_path=work)
+            a.write_json(work/'maintenance_manifest.json',{'result':{'tests_passed':True}})
+            a.write_json(work/'autopilot_validation.json',{'passed':False,'checks':[{'returncode':1,'stderr':'full regression conflict'}]})
+            record=root/'trial.json';a.write_json(record,{'run_id':run,'steps':2,'status':'COMPLETE'})
+            with patch.object(a,'ROOT',root),patch.object(a,'action_attempts',return_value=1),patch('agents.governance.original_action_approved',return_value=False):
+                with self.assertRaisesRegex(ValueError,'original action approval'):p.extend_bounded_owner_budget(record)
+            self.assertEqual(1,p.db.get_maintenance_action(run,'g')['payload']['max_attempts'])
+            with patch.object(a,'ROOT',root),patch.object(a,'action_attempts',return_value=1),patch('agents.governance.original_action_approved',return_value=True):
+                p.extend_bounded_owner_budget(record)
+                with self.assertRaises(ValueError):p.extend_bounded_owner_budget(record)
+            self.assertEqual(2,p.db.get_maintenance_action(run,'g')['payload']['max_attempts'])
+            self.assertEqual('APPROVED',p.db.get_maintenance_action(run,'g')['status'])
+            p.analyze_new_snapshot.assert_not_called();p.process_actions.assert_not_called()
